@@ -8,7 +8,12 @@ from loguru import logger
 import torch.nn.functional as F
 
 # import minecraft.nbt as nbt
-from PyAnvilEditor.pyanvil import World, BlockState, Canvas
+try:
+    from PyAnvilEditor.pyanvil import World, BlockState, Canvas
+except Exception:  # allows tensor-only workflows without the submodule installed
+    World = None
+    BlockState = None
+    Canvas = None
 from utils import load_pkl
 
 
@@ -132,7 +137,8 @@ def one_hot_to_blockdata_level(oh_level, tokens, block2repr, repr_type):
         elif repr_type == "block2vec":
             reprs = torch.stack(list(block2repr.values()))
             o = oh_level.squeeze().permute(1, 2, 3, 0)[..., None]
-            r = reprs.to("cuda").permute(1, 0)[None, None, None, ...]
+            # Match device (CUDA/CPU) of the generated tensor.
+            r = reprs.to(oh_level.device).permute(1, 0)[None, None, None, ...]
             d = (o - r).pow(2).sum(dim=-2)
             bdata = d.argmin(dim=-1).cpu()
         else:  # No repr
@@ -171,6 +177,12 @@ def read_level(opt: Config):
 
 def read_level_from_file(input_dir, input_name, coords, block2repr, repr_type, debug=False):
     """ coords is ((y0,yend), (z0,zend), (x0,xend)) """
+
+    if World is None:
+        raise ImportError(
+            "PyAnvilEditor is not available. Initialize the git submodule 'PyAnvilEditor' "
+            "or install it so `from PyAnvilEditor.pyanvil import World` works."
+        )
 
     if repr_type == "block2vec":
         # Read Representations
@@ -225,6 +237,11 @@ def read_level_from_file(input_dir, input_name, coords, block2repr, repr_type, d
 
 
 def save_level_to_world(input_dir, input_name, start_coords, bdata_level, token_list, props=None, debug=False):
+    if World is None or BlockState is None:
+        raise ImportError(
+            "PyAnvilEditor is not available. Initialize the git submodule 'PyAnvilEditor' "
+            "or install it so `from PyAnvilEditor.pyanvil import World, BlockState` works."
+        )
     if not props:
         props = [{} for _ in range(len(token_list))]
 
@@ -245,6 +262,11 @@ def save_level_to_world(input_dir, input_name, start_coords, bdata_level, token_
 
 
 def save_oh_to_wrld_directly(input_dir, input_name, start_coords, oh_level, block2repr, repr_type, token_list=None, props=None, debug=False):
+    if World is None or BlockState is None:
+        raise ImportError(
+            "PyAnvilEditor is not available. Initialize the git submodule 'PyAnvilEditor' "
+            "or install it so `from PyAnvilEditor.pyanvil import World, BlockState` works."
+        )
     if repr_type == "autoencoder":
         oh_level = block2repr["decoder"](oh_level).detach()
     elif repr_type == "block2vec":

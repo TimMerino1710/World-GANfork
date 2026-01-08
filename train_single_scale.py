@@ -32,7 +32,9 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
     the amplitudes for the noise in all the scales. opt is a namespace that holds all necessary parameters. """
     current_scale = len(generators)
 
-    clear_empty_world(opt.output_dir, 'Curr_Empty_World')  # reset tmp world
+    # Minecraft-only: reset temp world
+    if opt.enable_minecraft_io and opt.input_type == "minecraft":
+        clear_empty_world(opt.output_dir, 'Curr_Empty_World')  # reset tmp world
 
     if opt.use_multiple_inputs:
         real_group = []
@@ -217,7 +219,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
                                f"D_real_grad@{current_scale}": diff_d_real,
                                f"D_fake_grad@{current_scale}": diff_d_fake,
                                },
-                              step=step, sync=False)
+                              step=step)
                 optimizerD.step()
 
                 if opt.use_multiple_inputs:
@@ -267,7 +269,7 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
             wandb.log({f"noise_amplitude@{current_scale}": opt.noise_amp,
                        f"rec_loss@{current_scale}": rec_loss.item(),
                        f"G_grad@{current_scale}": diff_g},
-                      step=step, sync=False, commit=True)
+                      step=step, commit=True)
 
         # Rendering and logging images of levels
         if epoch % 500 == 0 or epoch == (opt.niter - 1):
@@ -275,28 +277,29 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
 
             to_level = one_hot_to_blockdata_level
 
-            try:
-                subprocess.call(["wine", '--version'])
-                real_scaled = to_level(real.detach(), token_list, opt.block2repr, opt.repr_type)
+            if opt.enable_minecraft_io and opt.input_type == "minecraft":
+                try:
+                    subprocess.call(["wine", '--version'])
+                    real_scaled = to_level(real.detach(), token_list, opt.block2repr, opt.repr_type)
 
-                # Minecraft World
-                worldname = 'Curr_Empty_World'
-                clear_empty_world(opt.output_dir, worldname)  # reset tmp world
-                to_render = [real_scaled, to_level(fake.detach(), token_list, opt.block2repr, opt.repr_type),
-                            to_level(G(Z_opt.detach(), z_prev), token_list, opt.block2repr, opt.repr_type)]
-                render_names = [f"real@{current_scale}", f"G(z)@{current_scale}", f"G(z_opt)@{current_scale}"]
-                obj_pth = os.path.join(opt.out_, f"objects/{current_scale}")
-                os.makedirs(obj_pth, exist_ok=True)
-                for n, level in enumerate(to_render):
-                    pos = n * (level.shape[0] + 5)
-                    save_level_to_world(opt.output_dir, worldname, (pos, 0, 0), level, token_list, opt.props)
-                    curr_coords = [[pos, pos + real_scaled.shape[0]],
-                                   [0, real_scaled.shape[1]],
-                                   [0, real_scaled.shape[2]]]
-                    render_pth = render_minecraft(worldname, curr_coords, obj_pth, render_names[n])
-                    wandb.log({render_names[n]: wandb.Object3D(open(render_pth))}, commit=False)
-            except OSError:
-                pass
+                    # Minecraft World
+                    worldname = 'Curr_Empty_World'
+                    clear_empty_world(opt.output_dir, worldname)  # reset tmp world
+                    to_render = [real_scaled, to_level(fake.detach(), token_list, opt.block2repr, opt.repr_type),
+                                to_level(G(Z_opt.detach(), z_prev), token_list, opt.block2repr, opt.repr_type)]
+                    render_names = [f"real@{current_scale}", f"G(z)@{current_scale}", f"G(z_opt)@{current_scale}"]
+                    obj_pth = os.path.join(opt.out_, f"objects/{current_scale}")
+                    os.makedirs(obj_pth, exist_ok=True)
+                    for n, level in enumerate(to_render):
+                        pos = n * (level.shape[0] + 5)
+                        save_level_to_world(opt.output_dir, worldname, (pos, 0, 0), level, token_list, opt.props)
+                        curr_coords = [[pos, pos + real_scaled.shape[0]],
+                                       [0, real_scaled.shape[1]],
+                                       [0, real_scaled.shape[2]]]
+                        render_pth = render_minecraft(worldname, curr_coords, obj_pth, render_names[n])
+                        wandb.log({render_names[n]: wandb.Object3D(open(render_pth))}, commit=False)
+                except OSError:
+                    pass
 
             # Learning Rate scheduler step
             schedulerD.step()
@@ -309,5 +312,6 @@ def train_single_scale(D, G, reals, generators, noise_maps, input_from_prev_scal
 
     torch.save(z_opt, "%s/z_opt.pth" % opt.outf)
     save_networks(G, D, z_opt, opt)
-    wandb.save(opt.outf)
+    # Save the scale artifacts to wandb (glob files, not the directory itself).
+    wandb.save(os.path.join(opt.outf, "*.pth"))
     return z_opt, input_from_prev_scale, G

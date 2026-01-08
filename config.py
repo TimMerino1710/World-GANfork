@@ -25,6 +25,24 @@ class Config(Tap):
     # use mulitple inputs for training (use --input-names instead of --input-name)
     use_multiple_inputs: bool = False
 
+    # ---- Input backend ----
+    # minecraft: read blocks from a Minecraft world folder via PyAnvilEditor
+    # tensor: load a preprocessed tensor/ndarray from disk (recommended for custom pipelines)
+    input_type: Literal["minecraft", "tensor"] = "minecraft"
+
+    # Tensor input options (used when input_type == "tensor")
+    tensor_path: Optional[str] = None  # path to a single sample (e.g. .pt/.pth/.npy)
+    tensor_paths: List[str] = []  # paths to multiple samples (optional future use)
+    tensor_layout: Literal["CXYZ", "1CXYZ", "XYZC", "1XYZC", "XYZ"] = "1CXYZ"
+    num_channels: Optional[int] = None  # required if tensor_layout == "XYZ" (integer id volume)
+    token_list_path: Optional[str] = None  # optional: list[str] mapping channel -> token name
+    tensor_key: Optional[str] = None  # if tensor_path is a dict, which key contains the tensor?
+    tensor_index: Optional[int] = None  # if tensor_path is a (list/tuple), which index contains the tensor?
+
+    # If False, disable all Minecraft world I/O (clear world, write worlds, Mineways rendering)
+    # Automatically disabled for tensor input.
+    enable_minecraft_io: bool = True
+
     # if minecraft is used, which coords are used from the world? Which world do we save to?
     input_area_name: str = "ruins"  # needs to be a string from the coord dictionary in input folder
     output_dir: str = "../minecraft_worlds/"  # folder with worlds
@@ -52,13 +70,27 @@ class Config(Tap):
                              'U', 'X', 'g', 'k', 't']  # default list of 1-1
 
     repr_type: str = None  # Which representation type to use, currently [None, block2vec, autoencoder]
+    block2repr_path: Optional[str] = None  # for repr_type=block2vec with tensor input: path to representations.pkl
 
-    def __init__(self,
-                 *args,
-                 underscores_to_dashes: bool = False,
-                 explicit_bool: bool = False,
-                 **kwargs):
-        super().__init__(args, underscores_to_dashes, explicit_bool, kwargs)
+    # NOTE:
+    # Older versions of this repo attempted to override Tap's __init__ and forward arguments,
+    # but the previous implementation passed a tuple/dict as positional arguments into
+    # argparse.ArgumentParser, which breaks on modern `typed-argument-parser`/`tap` versions.
+    #
+    # Tap already supports these flags, so we just forward them correctly.
+    def __init__(
+        self,
+        *args,
+        underscores_to_dashes: bool = False,
+        explicit_bool: bool = False,
+        **kwargs,
+    ):
+        super().__init__(
+            *args,
+            underscores_to_dashes=underscores_to_dashes,
+            explicit_bool=explicit_bool,
+            **kwargs,
+        )
 
     def process_args(self):
         self.device = torch.device("cpu" if self.not_cuda else "cuda:0")
@@ -83,34 +115,45 @@ class Config(Tap):
         # which scale to stop on - usually always last scale defined
         self.stop_scale = self.num_scales + 1
 
-        coord_dict = load_pkl('primordial_coords_dict', 'input/minecraft/')
-        tmp_coords = coord_dict[self.input_area_name]
-        sub_coords = [(self.sub_coords[0], self.sub_coords[1]),
-                      (self.sub_coords[2], self.sub_coords[3]),
-                      (self.sub_coords[4], self.sub_coords[5])]
-        self.coords = []
-        for i, (start, end) in enumerate(sub_coords):
-            curr_len = tmp_coords[i][1] - tmp_coords[i][0]
-            if isinstance(start, float):
-                tmp_start = curr_len * start + tmp_coords[i][0]
-                tmp_end = curr_len * end + tmp_coords[i][0]
-            elif isinstance(start, int):
-                tmp_start = tmp_coords[i][0] + start
-                tmp_end = tmp_coords[i][0] + end
-            else:
-                AttributeError("Unexpected type for sub_coords")
-                tmp_start = tmp_coords[i][0]
-                tmp_end = tmp_coords[i][1]
+        # Disable Minecraft world I/O automatically for tensor input unless explicitly re-enabled
+        if self.input_type == "tensor":
+            self.enable_minecraft_io = False
 
-            self.coords.append((int(tmp_start), int(tmp_end)))
+        # Minecraft-only coordinate logic (tensor inputs don't have coords)
+        if self.input_type == "minecraft":
+            coord_dict = load_pkl('primordial_coords_dict', 'input/minecraft/')
+            tmp_coords = coord_dict[self.input_area_name]
+            sub_coords = [(self.sub_coords[0], self.sub_coords[1]),
+                          (self.sub_coords[2], self.sub_coords[3]),
+                          (self.sub_coords[4], self.sub_coords[5])]
+            self.coords = []
+            for i, (start, end) in enumerate(sub_coords):
+                curr_len = tmp_coords[i][1] - tmp_coords[i][0]
+                if isinstance(start, float):
+                    tmp_start = curr_len * start + tmp_coords[i][0]
+                    tmp_end = curr_len * end + tmp_coords[i][0]
+                elif isinstance(start, int):
+                    tmp_start = tmp_coords[i][0] + start
+                    tmp_end = tmp_coords[i][0] + end
+                else:
+                    AttributeError("Unexpected type for sub_coords")
+                    tmp_start = tmp_coords[i][0]
+                    tmp_end = tmp_coords[i][1]
+
+                self.coords.append((int(tmp_start), int(tmp_end)))
+        else:
+            self.coords = None
 
         if not self.repr_type:
             self.block2repr = None
         elif self.repr_type == "block2vec":
             # self.block2repr = load_pkl('prim_cutout_representations_ruins',
             #                            prepath='/home/awiszus/Project/TOAD-GAN/input/minecraft/')
-            self.block2repr = load_pkl("representations",
-                                        f"/home/schubert/projects/TOAD-GAN/input/minecraft/{self.input_area_name}/")
+            # NOTE: original code used an absolute Linux path. Prefer a repo-relative default.
+            self.block2repr = load_pkl(
+                "representations",
+                f"input/minecraft/{self.input_area_name}/"
+            )
         
         else:
             AttributeError("unexpected repr_type, use [None, block2vec, autoencoder]")

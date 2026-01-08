@@ -74,30 +74,32 @@ def train(real, opt: Config):
 
     opt.stop_scale = stop_scale
 
-    # Log the original input level(s) as an image
-    if opt.use_multiple_inputs:
-        # Multi Input is not tested for Minecraft
-        for i, level in enumerate(real):
+    # Log the original input level(s) as an image (Minecraft-only)
+    if opt.enable_minecraft_io and opt.input_type == "minecraft":
+        if opt.use_multiple_inputs:
+            # Multi Input is not tested for Minecraft
+            for i, level in enumerate(real):
+                try:
+                    subprocess.call(["wine", '--version'])
+                    obj_pth = os.path.join(opt.out_, "objects/real")
+                    os.makedirs(obj_pth, exist_ok=True)
+                    real_obj_pth = render_minecraft(opt.input_names[i], opt.coords, obj_pth, "real")
+                    wandb.log({"real": wandb.Object3D(open(real_obj_pth))}, commit=False)
+                except OSError:
+                    pass
+        else:
+            # Default: One image
             try:
+                # Check if wine is installed (Linux), then render
                 subprocess.call(["wine", '--version'])
                 obj_pth = os.path.join(opt.out_, "objects/real")
                 os.makedirs(obj_pth, exist_ok=True)
-                real_obj_pth = render_minecraft(opt.input_names[i], opt.coords, obj_pth, "real")
+                real_obj_pth = render_minecraft(opt.input_name, opt.coords, obj_pth, "real")
                 wandb.log({"real": wandb.Object3D(open(real_obj_pth))}, commit=False)
             except OSError:
                 pass
-    else:
-        # Default: One image
-        try:
-            # Check if wine is installed (Linux), then render
-            subprocess.call(["wine", '--version'])
-            obj_pth = os.path.join(opt.out_, "objects/real")
-            os.makedirs(obj_pth, exist_ok=True)
-            real_obj_pth = render_minecraft(opt.input_name, opt.coords, obj_pth, "real")
-            wandb.log({"real": wandb.Object3D(open(real_obj_pth))}, commit=False)
-        except OSError:
-            pass
-        os.makedirs("%s/state_dicts" % (opt.out_), exist_ok=True)
+
+    os.makedirs("%s/state_dicts" % (opt.out_), exist_ok=True)
 
     # Training Loop
     for current_scale in range(0, stop_scale):

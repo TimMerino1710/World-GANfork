@@ -21,6 +21,7 @@ from minecraft.special_minecraft_downsampling import special_minecraft_downsampl
 from minecraft.level_utils import one_hot_to_blockdata_level, save_level_to_world, clear_empty_world
 from minecraft.level_utils import read_level as mc_read_level
 from minecraft.level_renderer import render_minecraft
+from tensor_level_utils import read_level_from_tensor
 from generate_noise import generate_spatial_noise
 from models import load_trained_pyramid
 from utils import interpolate3D
@@ -194,7 +195,7 @@ def generate_samples(generators, noise_maps, reals, noise_amplitudes, opt: Gener
                     real_level = to_level(reals[current_scale], token_list, opt.block2repr, opt.repr_type)
                     torch.save(real_level, "%s/real_bdata.pt" % dir2save)
                     torch.save(token_list, "%s/token_list.pt" % dir2save)
-                    if render_images:
+                    if render_images and opt.enable_minecraft_io and opt.input_type == "minecraft":
                         real_pth = "%s/reals" % dir2save
                         os.makedirs(real_pth, exist_ok=True)
                         save_level_to_world(opt.output_dir, opt.output_name, (0, 0, 0), real_level, token_list, props)
@@ -209,7 +210,7 @@ def generate_samples(generators, noise_maps, reals, noise_amplitudes, opt: Gener
                 # new_schem = NanoMCSchematic(save_path, level.shape[:3])
                 # new_schem.set_blockdata(level)
                 # new_schem.saveToFile()
-                if render_images:
+                if render_images and opt.enable_minecraft_io and opt.input_type == "minecraft":
                     obj_pth = "%s/objects/%d" % (dir2save, current_scale)
                     os.makedirs(obj_pth, exist_ok=True)
                     try:
@@ -250,11 +251,18 @@ if __name__ == '__main__':
 
     # Init game specific inputs
     opt.ImgGen = None
-    clear_empty_world(opt.output_dir, opt.output_name)
     downsample = special_minecraft_downsampling
 
     # Read level according to input arguments
-    real = mc_read_level(opt)
+    if opt.enable_minecraft_io and opt.input_type == "minecraft":
+        clear_empty_world(opt.output_dir, opt.output_name)
+
+    if opt.input_type == "minecraft":
+        real = mc_read_level(opt)
+    elif opt.input_type == "tensor":
+        real = read_level_from_tensor(opt)
+    else:
+        raise ValueError(f"Unknown input_type: {opt.input_type}")
 
     if opt.use_multiple_inputs:  # multi-input still doesn't work
         real = real[0].to(opt.device)
