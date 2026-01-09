@@ -1,0 +1,39 @@
+sample:
+  # Everything about how to interpret the sample tensor stays constant across runs.
+  tensor_layout: 1CXYZ
+  tensor_key: null
+  tensor_index: null
+  num_channels: null
+
+  # Optional: helps block2vec label tokens and keeps ordering consistent with your visualization mappings
+  mappings_path: datasets/one_sample_per_biome_pt/32_biome_parts_dir_balanced_cc_oh_mappings.pt
+  block_types_path: assets/block_types.json
+
+  # Optional: if you already have a token list describing your channel order / vocab
+  token_list_path: null
+
+block2vec:
+  # Skip-gram / word2vec hyperparams
+  emb_dimension: 32
+  neighbor_radius: 1
+  batch_size: 256
+  epochs: 10
+  lr: 0.001
+  device: cuda
+  num_workers: 0
+
+gan:
+  # World-GAN hyperparams (these keys map directly to fields in config.py)
+  niter: 100
+  nfc: 64
+  num_layer: 3
+  scales: [0.75, 0.5]
+  alpha: 100
+  # pad_with_noise: true   # bools are flags; include true to enable
+
+runtime:
+  out_root: output
+  wandb_mode: offline
+  gpu: 0  # sets CUDA_VISIBLE_DEVICES (main.py will use cuda:0 within that visibility scope)
+
+
