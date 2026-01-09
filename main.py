@@ -52,8 +52,15 @@ def main():
         sample_name = Path(opt.tensor_path).stem
     else:
         sample_name = Path(opt.input_name).stem
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = _safe_name(f"{sample_name}_{ts}")
+
+    # Allow external launchers to force a specific run name (useful for pipelines).
+    forced = os.environ.get("WORLDGAN_RUN_NAME")
+    forced_run_name = bool(forced)
+    if forced_run_name:
+        run_name = _safe_name(forced)
+    else:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = _safe_name(f"{sample_name}_{ts}")
 
     # Init wandb
     run = wandb.init(project="world-gan", tags=get_tags(opt), name=run_name,
@@ -66,15 +73,20 @@ def main():
     runs_root = os.path.join(opt.out, "runs")
     os.makedirs(runs_root, exist_ok=True)
 
-    # Avoid collisions if you launch multiple runs in the same second.
     out_dir = os.path.join(runs_root, run_name)
-    if os.path.exists(out_dir):
-        i = 2
-        while os.path.exists(f"{out_dir}_{i}"):
-            i += 1
-        out_dir = f"{out_dir}_{i}"
-    opt.out_ = out_dir
-    os.makedirs(opt.out_, exist_ok=True)
+    if forced_run_name:
+        # If an external pipeline chose the name, don't auto-suffix; it is responsible for uniqueness.
+        opt.out_ = out_dir
+        os.makedirs(opt.out_, exist_ok=True)
+    else:
+        # Avoid collisions if you launch multiple runs in the same second.
+        if os.path.exists(out_dir):
+            i = 2
+            while os.path.exists(f"{out_dir}_{i}"):
+                i += 1
+            out_dir = f"{out_dir}_{i}"
+        opt.out_ = out_dir
+        os.makedirs(opt.out_, exist_ok=True)
 
     # Relic from old code, where the results where rendered with a generator
     opt.ImgGen = None

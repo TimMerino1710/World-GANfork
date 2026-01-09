@@ -70,6 +70,20 @@ Make sure you define the path to a pretrained World-GAN and the correct input pa
 $ python generate_samples.py  --out_ path/to/pretrained/World-GAN --input-dir input --input-name lvl_1-1.txt --num_layer 3 --alpha 100 --niter 4000 --nfc 64
 ```
 
+### One-command pipeline (block2vec + World-GAN)
+
+If you train on **tensor** inputs with **block2vec representations**, you can run the full pipeline (1) train block2vec on the sample, then (2) train World-GAN using those representations, with a single config file:
+
+```
+$ python train_pipeline.py --config configs/pipeline_example.yaml --sample datasets/one_sample_per_biome_pt/beaches.pt
+```
+
+To target a specific GPU, either set `CUDA_VISIBLE_DEVICES` yourself or use the `--gpu` override:
+
+```
+$ python train_pipeline.py --config configs/pipeline_example.yaml --sample datasets/one_sample_per_biome_pt/beaches.pt --gpu 1
+```
+
 ### Experiments
 
 We supply the code for experiments made for our paper.
