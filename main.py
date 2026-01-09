@@ -1,6 +1,9 @@
 # Code inspired by https://github.com/tamarott/SinGAN
 import os
 import subprocess
+import re
+from datetime import datetime
+from pathlib import Path
 from generate_samples import generate_samples
 from train import train
 from config import Config
@@ -36,15 +39,41 @@ def main():
     # Parse arguments
     opt = Config().parse_args()
 
+    def _safe_name(s: str) -> str:
+        s = (s or "").strip()
+        s = re.sub(r"\s+", "_", s)
+        # Keep filesystem-friendly characters
+        s = re.sub(r"[^A-Za-z0-9._-]+", "-", s)
+        return s.strip("._-") or "run"
+
+    # Name runs like: <sample_name>_<YYYYMMDD_HHMMSS>
+    # For tensor inputs, sample_name comes from the tensor filename before ".pt".
+    if opt.input_type == "tensor" and getattr(opt, "tensor_path", None):
+        sample_name = Path(opt.tensor_path).stem
+    else:
+        sample_name = Path(opt.input_name).stem
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = _safe_name(f"{sample_name}_{ts}")
+
     # Init wandb
-    run = wandb.init(project="world-gan", tags=get_tags(opt),
+    run = wandb.init(project="world-gan", tags=get_tags(opt), name=run_name,
                      config=opt, dir=opt.out, mode=os.environ.get("WANDB_MODE", "offline"))
 
     # IMPORTANT:
     # Don't write training artifacts directly into wandb's internal run dir (especially on Windows).
     # Keep outputs in a normal folder, and let wandb.save() copy artifacts into the run.
     opt.wandb_run_dir = run.dir
-    opt.out_ = os.path.join(opt.out, "runs", run.id)
+    runs_root = os.path.join(opt.out, "runs")
+    os.makedirs(runs_root, exist_ok=True)
+
+    # Avoid collisions if you launch multiple runs in the same second.
+    out_dir = os.path.join(runs_root, run_name)
+    if os.path.exists(out_dir):
+        i = 2
+        while os.path.exists(f"{out_dir}_{i}"):
+            i += 1
+        out_dir = f"{out_dir}_{i}"
+    opt.out_ = out_dir
     os.makedirs(opt.out_, exist_ok=True)
 
     # Relic from old code, where the results where rendered with a generator
