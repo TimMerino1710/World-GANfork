@@ -9,6 +9,8 @@ from torch import cuda
 from tap import Tap
 
 from utils import set_seed, load_pkl
+import os
+import pickle
 
 
 class Config(Tap):
@@ -53,7 +55,8 @@ class Config(Tap):
     nfc: int = 64  # number of filters for conv layers
     ker_size: int = 3  # kernel size for conv layers
     num_layer: int = 3  # number of layers
-    scales: List[float] = [0.75, 0.5, 0.25]  # Scales descending (< 1 and > 0)
+    # scales: List[float] = [0.75, 0.5, 0.25]  # Scales descending (< 1 and > 0)
+    scales: List[float] = [0.75, 0.5]
     noise_update: float = 0.1  # additive noise weight
     # use reflection padding? (makes edges random)
     pad_with_noise: bool = False
@@ -93,10 +96,13 @@ class Config(Tap):
         )
 
     def process_args(self):
-        self.device = torch.device("cpu" if self.not_cuda else "cuda:0")
-        if cuda.is_available() and self.not_cuda:
-            print(
-                "WARNING: You have a CUDA device, so you should probably run with --cuda")
+        cuda_available = cuda.is_available()
+        if self.not_cuda or (not cuda_available):
+            self.device = torch.device("cpu")
+        else:
+            self.device = torch.device("cuda:0")
+
+        print(f"Using device: {self.device} (cuda_available={cuda_available}, not_cuda={self.not_cuda})")
 
         if self.manualSeed is None:
             self.manualSeed = random.randint(1, 10000)
@@ -147,13 +153,22 @@ class Config(Tap):
         if not self.repr_type:
             self.block2repr = None
         elif self.repr_type == "block2vec":
-            # self.block2repr = load_pkl('prim_cutout_representations_ruins',
-            #                            prepath='/home/awiszus/Project/TOAD-GAN/input/minecraft/')
-            # NOTE: original code used an absolute Linux path. Prefer a repo-relative default.
-            self.block2repr = load_pkl(
-                "representations",
-                f"input/minecraft/{self.input_area_name}/"
-            )
+            if self.input_type == "tensor":
+                if not self.block2repr_path:
+                    raise ValueError(
+                        "For --input_type tensor and --repr_type block2vec, you must provide --block2repr_path "
+                        "pointing at a representations.pkl file."
+                    )
+                with open(self.block2repr_path, "rb") as f:
+                    self.block2repr = pickle.load(f)
+                if not isinstance(self.block2repr, dict) or len(self.block2repr) == 0:
+                    raise ValueError(f"Loaded block2repr from {self.block2repr_path} but it was empty or not a dict")
+            else:
+                # NOTE: original code used an absolute Linux path. Prefer a repo-relative default.
+                self.block2repr = load_pkl(
+                    "representations",
+                    f"input/minecraft/{self.input_area_name}/"
+                )
         
         else:
             AttributeError("unexpected repr_type, use [None, block2vec, autoencoder]")

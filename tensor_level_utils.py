@@ -227,9 +227,13 @@ def read_level_from_tensor(opt) -> torch.Tensor:
     onehot = _to_1cxyz_onehot(t, layout=opt.tensor_layout, num_channels=opt.num_channels)
 
     c = int(onehot.shape[1])
+    token_list: List[str]
     if opt.token_list_path:
         token_list = _load_token_list(opt.token_list_path)
-        if len(token_list) != c:
+        # For one-hot workflows, token_list_path is expected to describe channel order (len == C).
+        # For block2vec workflows, token_list_path typically describes the embedding vocabulary order
+        # (which may be smaller than C if your exemplar doesn't use all global channels).
+        if getattr(opt, "repr_type", None) != "block2vec" and len(token_list) != c:
             raise ValueError(
                 f"token_list length ({len(token_list)}) does not match tensor channels ({c})"
             )
@@ -259,21 +263,30 @@ def read_level_from_tensor(opt) -> torch.Tensor:
         # IMPORTANT: token_list for block2vec is the embedding vocabulary (dict keys), not the embedding dimension.
         vocab = list(block2repr.keys())
         if opt.token_list_path:
-            # If a token_list was provided, ensure it matches the embedding dict keys (order matters).
+            # For block2vec, token_list_path should describe the same vocabulary as representations.pkl.
+            # It does NOT need to match the original one-hot channel count.
             if len(token_list) != len(vocab) or set(token_list) != set(vocab):
                 raise ValueError(
                     "token_list_path does not match block2repr keys. "
                     "For block2vec, token_list_path should describe the same tokens as representations.pkl."
                 )
-            # Prefer the explicit token_list ordering supplied by the user.
-            vocab = token_list
+            vocab = token_list  # use explicit ordering
 
         # Build embedding matrix in vocab order: (V, D)
         emb_mat = torch.stack([block2repr[t].detach().to(torch.float32).cpu() for t in vocab], dim=0)
         d = int(emb_mat.shape[1])
 
         # Convert one-hot -> indices -> embeddings
-        idx = onehot.argmax(dim=1).squeeze(0).to(torch.long)  # (X,Y,Z)
+        idx = onehot.argmax(dim=1).squeeze(0).to(torch.long)  # (X,Y,Z) indices into original channels
+        max_idx = int(idx.max().item()) if idx.numel() else 0
+        if max_idx >= len(vocab):
+            raise ValueError(
+                f"Your one-hot tensor uses channel indices up to {max_idx}, but your block2vec vocabulary has "
+                f"only {len(vocab)} entries. This usually means you trained representations on a smaller vocab.\n"
+                f"Fix options:\n"
+                f"- Train block2vec with a vocabulary size that matches your channel space (C={c}), or\n"
+                f"- Ensure the exemplar only uses indices < {len(vocab)} (compress/reindex channels for this exemplar)."
+            )
         emb = emb_mat[idx]  # (X,Y,Z,D)
         emb = emb.permute(3, 0, 1, 2).unsqueeze(0).contiguous()  # (1,D,X,Y,Z)
 
